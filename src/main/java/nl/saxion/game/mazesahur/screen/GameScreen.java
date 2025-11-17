@@ -4,6 +4,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import nl.saxion.game.mazesahur.config.GameConfig;
 import nl.saxion.game.mazesahur.entity.Player;
@@ -14,6 +15,10 @@ import nl.saxion.game.mazesahur.rendering.MaterialManager;
 import nl.saxion.game.mazesahur.rendering.MazeRenderer;
 import nl.saxion.game.mazesahur.world.Maze;
 import nl.saxion.game.mazesahur.ui.GameUI;
+import nl.saxion.game.mazesahur.vr.VRManager;
+import nl.saxion.game.mazesahur.vr.VRInput;
+import nl.saxion.game.mazesahur.vr.VRCameraController;
+import nl.saxion.game.mazesahur.vr.StereoFramebufferManager;
 import nl.saxion.gameapp.GameApp;
 import nl.saxion.gameapp.screens.ScalableGameScreen;
 
@@ -41,12 +46,22 @@ public class GameScreen extends ScalableGameScreen {
     // UI
     private GameUI gameUI;
 
-    // Camera control
+    // VR components (only used when VR_ENABLED = true)
+    private VRManager vrManager;
+    private VRInput vrInput;
+    private VRCameraController vrCameraController;
+    private StereoFramebufferManager stereoFramebufferManager;
+    private boolean vrMode = false; // Actual VR mode status (depends on hardware availability)
+
+    // Camera control (non-VR mode)
     private float yaw;
     private float pitch;
     private int lastMouseX;
     private int lastMouseY;
     private boolean firstMouse;
+
+    // Body yaw for VR mode (separate from head rotation)
+    private float bodyYaw = 0f;
 
     private static final float MOUSE_SENSITIVITY = 0.2f;
     private static final float MAX_PITCH = 89f;
@@ -110,9 +125,49 @@ public class GameScreen extends ScalableGameScreen {
         // Initialize camera (must be done after OpenGL context is ready)
         final int screenWidth = Gdx.graphics.getBackBufferWidth();
         final int screenHeight = Gdx.graphics.getBackBufferHeight();
-        camera = new PerspectiveCamera(67, screenWidth, screenHeight);
-        camera.near = 0.01f;
-        camera.far = 100f;
+
+        // Initialize VR if enabled
+        if (GameConfig.VR_ENABLED) {
+            System.out.println("[GameScreen] VR mode enabled, initializing VR system...");
+            try {
+                vrManager = new VRManager();
+                if (vrManager.initialize()) {
+                    vrMode = true;
+                    vrInput = new VRInput();
+                    vrInput.setUseSnapTurn(GameConfig.VR_SNAP_TURN);
+                    vrInput.setSnapTurnAngle(GameConfig.VR_SNAP_TURN_ANGLE);
+
+                    vrCameraController = new VRCameraController(vrManager, screenWidth, screenHeight);
+                    vrCameraController.setBodyPosition(player.getPosition());
+                    vrCameraController.setBodyYaw(bodyYaw);
+
+                    stereoFramebufferManager = new StereoFramebufferManager(vrManager);
+
+                    System.out.println("[GameScreen] VR system initialized successfully");
+                } else {
+                    System.err.println("[GameScreen] VR initialization failed, falling back to desktop mode");
+                    vrMode = false;
+                }
+            } catch (UnsatisfiedLinkError e) {
+                System.err.println("[GameScreen] VR native library not available: " + e.getMessage());
+                System.err.println("[GameScreen] This is expected on ARM64 macOS (Apple Silicon)");
+                System.err.println("[GameScreen] Falling back to desktop mode");
+                vrMode = false;
+                vrManager = null;
+            } catch (Exception e) {
+                System.err.println("[GameScreen] Unexpected error during VR initialization: " + e.getMessage());
+                e.printStackTrace();
+                vrMode = false;
+                vrManager = null;
+            }
+        }
+
+        // Initialize standard camera for non-VR mode or VR fallback
+        if (!vrMode) {
+            camera = new PerspectiveCamera(67, screenWidth, screenHeight);
+            camera.near = 0.01f;
+            camera.far = 100f;
+        }
 
         // Initialize rendering systems (requires OpenGL context)
         lightingManager = new LightingManager();
@@ -123,13 +178,15 @@ public class GameScreen extends ScalableGameScreen {
         gameUI = new GameUI();
         gameUI.initialize();
 
-        // Capture cursor for FPS controls
-        Gdx.input.setCursorCatched(true);
+        // Capture cursor for FPS controls (only in non-VR mode)
+        if (!vrMode) {
+            Gdx.input.setCursorCatched(true);
 
-        // Update camera
-        camera.position.set(player.getPosition());
-        camera.lookAt(player.getPosition().x, player.getPosition().y, player.getPosition().z - 1);
-        camera.update();
+            // Update camera for desktop mode
+            camera.position.set(player.getPosition());
+            camera.lookAt(player.getPosition().x, player.getPosition().y, player.getPosition().z - 1);
+            camera.update();
+        }
 
         // Initialize rendering systems
         materialManager.loadTextures();
@@ -167,98 +224,180 @@ public class GameScreen extends ScalableGameScreen {
 
             // Update lighting
             final boolean isMoving = player.isMoving();
-            lightingManager.updateFlashlight(player.getPosition(), camera.direction, delta, isMoving);
+            if (vrMode) {
+                // VR mode - use head look direction for flashlight
+                final Vector3 headDirection = vrCameraController.getHeadLookDirection();
+                final Vector3 headPos = vrCameraController.getHeadPosition();
+                lightingManager.updateFlashlight(headPos, headDirection, delta, isMoving);
+            } else {
+                // Desktop mode - use camera direction
+                lightingManager.updateFlashlight(player.getPosition(), camera.direction, delta, isMoving);
+            }
             mazeRenderer.updateLampFlicker(delta);
 
             // Handle input
             handleGameInput();
         }
 
-        // Clear screen
-        Gdx.gl.glClearColor(0.0f, 0.0f, 0.0f, 1f);
-        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        if (vrMode) {
+            // VR Mode: Stereo rendering to framebuffers
 
-        // Render 3D scene (elevator is rendered together with maze to prevent material bleeding)
-        mazeRenderer.renderWithElevator(camera, elevator);
-        mazeRenderer.renderEnemy(camera, enemy);
+            // Render LEFT eye
+            stereoFramebufferManager.bind(StereoFramebufferManager.Eye.LEFT);
+            mazeRenderer.renderWithElevator(vrCameraController.getLeftEyeCamera(), elevator);
+            mazeRenderer.renderEnemy(vrCameraController.getLeftEyeCamera(), enemy);
+            stereoFramebufferManager.unbind();
 
-        // Render UI (hide during jumpscare)
-        if (!jumpscareActive) {
-            gameUI.render(this, player, enemy, elevator, lightingManager);
+            // Render RIGHT eye
+            stereoFramebufferManager.bind(StereoFramebufferManager.Eye.RIGHT);
+            mazeRenderer.renderWithElevator(vrCameraController.getRightEyeCamera(), elevator);
+            mazeRenderer.renderEnemy(vrCameraController.getRightEyeCamera(), enemy);
+            stereoFramebufferManager.unbind();
+
+            // Submit both eyes to VR compositor
+            stereoFramebufferManager.submit();
+
+            // Optional: Render to screen for debugging (side-by-side)
+            stereoFramebufferManager.renderToScreen();
+
+            // Note: VR UI rendering would go here (3D world-space UI)
+            // TODO: Implement VR UI rendering
+
+        } else {
+            // Desktop Mode: Standard mono rendering
+            // Clear screen
+            Gdx.gl.glClearColor(0.0f, 0.0f, 0.0f, 1f);
+            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+
+            // Render 3D scene (elevator is rendered together with maze to prevent material bleeding)
+            mazeRenderer.renderWithElevator(camera, elevator);
+            mazeRenderer.renderEnemy(camera, enemy);
+
+            // Render UI (hide during jumpscare)
+            if (!jumpscareActive) {
+                gameUI.render(this, player, enemy, elevator, lightingManager);
+            }
         }
     }
 
     /**
-     * Handles mouse look and WASD movement input.
+     * Handles mouse look and WASD movement input (desktop) or VR controller input (VR mode).
      */
     private void handleInput(final float delta) {
-        // Mouse look
-        final int mouseX = Gdx.input.getX();
-        final int mouseY = Gdx.input.getY();
+        if (vrMode) {
+            // VR Mode - Use controller input
+            vrInput.update(delta);
 
-        if (firstMouse) {
+            // Get movement from left thumbstick
+            final Vector2 movementInput = vrInput.getMovementInput();
+
+            // Get rotation from right thumbstick
+            final float rotationDelta = vrInput.getRotationInput();
+
+            // Apply rotation to body yaw
+            if (GameConfig.VR_SNAP_TURN) {
+                // Snap turning - already returns discrete angles
+                bodyYaw += rotationDelta;
+            } else {
+                // Smooth turning - scale by delta time
+                bodyYaw += rotationDelta * delta;
+            }
+
+            // Calculate movement direction based on body forward and right vectors
+            final Vector3 forward = vrCameraController.getBodyForward();
+            final Vector3 right = vrCameraController.getBodyRight();
+            final Vector3 moveDirection = new Vector3();
+
+            // Apply thumbstick input to movement direction
+            moveDirection.add(forward.cpy().scl(movementInput.y)); // Forward/backward
+            moveDirection.add(right.cpy().scl(movementInput.x));   // Left/right
+
+            // Apply movement with collision detection (same as desktop)
+            if (moveDirection.len() > 0) {
+                moveDirection.nor().scl(GameConfig.PLAYER_MOVE_SPEED * delta);
+
+                // Try full movement first
+                final Vector3 newPosition = player.getPosition().cpy().add(moveDirection);
+
+                if (!checkCollision(newPosition)) {
+                    // No collision, move freely
+                    player.getPosition().set(newPosition);
+                } else {
+                    // Collision detected - try wall sliding
+                    handleWallSliding(moveDirection, delta);
+                }
+            }
+
+        } else {
+            // Desktop Mode - Mouse and keyboard input
+            // Mouse look
+            final int mouseX = Gdx.input.getX();
+            final int mouseY = Gdx.input.getY();
+
+            if (firstMouse) {
+                lastMouseX = mouseX;
+                lastMouseY = mouseY;
+                firstMouse = false;
+            }
+
+            final float deltaX = (mouseX - lastMouseX) * MOUSE_SENSITIVITY;
+            final float deltaY = (mouseY - lastMouseY) * MOUSE_SENSITIVITY;
+
             lastMouseX = mouseX;
             lastMouseY = mouseY;
-            firstMouse = false;
-        }
 
-        final float deltaX = (mouseX - lastMouseX) * MOUSE_SENSITIVITY;
-        final float deltaY = (mouseY - lastMouseY) * MOUSE_SENSITIVITY;
+            yaw += deltaX;
+            pitch -= deltaY;
 
-        lastMouseX = mouseX;
-        lastMouseY = mouseY;
+            // Clamp pitch
+            if (pitch > MAX_PITCH) {
+                pitch = MAX_PITCH;
+            }
+            if (pitch < -MAX_PITCH) {
+                pitch = -MAX_PITCH;
+            }
 
-        yaw += deltaX;
-        pitch -= deltaY;
+            // Calculate movement direction
+            final Vector3 forward = getForwardVector();
+            final Vector3 right = getRightVector();
+            final Vector3 moveDirection = new Vector3();
 
-        // Clamp pitch
-        if (pitch > MAX_PITCH) {
-            pitch = MAX_PITCH;
-        }
-        if (pitch < -MAX_PITCH) {
-            pitch = -MAX_PITCH;
-        }
+            if (Gdx.input.isKeyPressed(Input.Keys.W)) {
+                moveDirection.add(forward);
+            }
+            if (Gdx.input.isKeyPressed(Input.Keys.S)) {
+                moveDirection.sub(forward);
+            }
+            if (Gdx.input.isKeyPressed(Input.Keys.A)) {
+                moveDirection.sub(right);
+            }
+            if (Gdx.input.isKeyPressed(Input.Keys.D)) {
+                moveDirection.add(right);
+            }
 
-        // Calculate movement direction
-        final Vector3 forward = getForwardVector();
-        final Vector3 right = getRightVector();
-        final Vector3 moveDirection = new Vector3();
+            // Apply movement with collision detection
+            if (moveDirection.len() > 0) {
+                moveDirection.nor().scl(GameConfig.PLAYER_MOVE_SPEED * delta);
 
-        if (Gdx.input.isKeyPressed(Input.Keys.W)) {
-            moveDirection.add(forward);
-        }
-        if (Gdx.input.isKeyPressed(Input.Keys.S)) {
-            moveDirection.sub(forward);
-        }
-        if (Gdx.input.isKeyPressed(Input.Keys.A)) {
-            moveDirection.sub(right);
-        }
-        if (Gdx.input.isKeyPressed(Input.Keys.D)) {
-            moveDirection.add(right);
-        }
+                // Try full movement first
+                final Vector3 newPosition = player.getPosition().cpy().add(moveDirection);
 
-        // Apply movement with collision detection
-        if (moveDirection.len() > 0) {
-            moveDirection.nor().scl(GameConfig.PLAYER_MOVE_SPEED * delta);
-
-            // Try full movement first
-            final Vector3 newPosition = player.getPosition().cpy().add(moveDirection);
-
-            if (!checkCollision(newPosition)) {
-                // No collision, move freely
-                player.getPosition().set(newPosition);
-            } else {
-                // Try sliding along walls (X direction only)
-                final Vector3 slideX = player.getPosition().cpy().add(moveDirection.x, 0, 0);
-                if (!checkCollision(slideX)) {
-                    player.getPosition().set(slideX);
+                if (!checkCollision(newPosition)) {
+                    // No collision, move freely
+                    player.getPosition().set(newPosition);
                 } else {
-                    // Try sliding along walls (Z direction only)
-                    final Vector3 slideZ = player.getPosition().cpy().add(0, 0, moveDirection.z);
-                    if (!checkCollision(slideZ)) {
-                        player.getPosition().set(slideZ);
+                    // Try sliding along walls (X direction only)
+                    final Vector3 slideX = player.getPosition().cpy().add(moveDirection.x, 0, 0);
+                    if (!checkCollision(slideX)) {
+                        player.getPosition().set(slideX);
+                    } else {
+                        // Try sliding along walls (Z direction only)
+                        final Vector3 slideZ = player.getPosition().cpy().add(0, 0, moveDirection.z);
+                        if (!checkCollision(slideZ)) {
+                            player.getPosition().set(slideZ);
+                        }
+                        // If both fail, player is stuck in corner and doesn't move
                     }
-                    // If both fail, player is stuck in corner and doesn't move
                 }
             }
         }
@@ -503,28 +642,57 @@ public class GameScreen extends ScalableGameScreen {
      * Handles non-movement game input (flashlight toggle, exit, elevator control, etc.).
      */
     private void handleGameInput() {
-        // Toggle flashlight
-        if (Gdx.input.isKeyJustPressed(Input.Keys.F)) {
-            lightingManager.toggleFlashlight();
-        }
+        if (vrMode) {
+            // VR Mode - Use controller buttons
 
-        // Toggle elevator doors with E key
-        if (Gdx.input.isKeyJustPressed(Input.Keys.E)) {
-            if (elevator != null) {
-                // Check if player is close enough to the elevator
-                final float distanceToElevator = elevator.getDistanceToPlayer(player.getPosition());
-                if (distanceToElevator <= 8.0f) { // Within 8 units
-                    elevator.toggleDoors();
-                } else {
-                    System.out.println("[GameScreen] Too far from elevator to control doors (distance: " + distanceToElevator + ")");
+            // Toggle flashlight with A button (right controller)
+            if (vrInput.isFlashlightButtonJustPressed()) {
+                lightingManager.toggleFlashlight();
+                vrInput.hapticRight(); // Haptic feedback
+            }
+
+            // Toggle elevator doors with X button (left controller)
+            if (vrInput.isInteractButtonJustPressed()) {
+                if (elevator != null) {
+                    // Check if player is close enough to the elevator
+                    final float distanceToElevator = elevator.getDistanceToPlayer(player.getPosition());
+                    if (distanceToElevator <= 8.0f) { // Within 8 units
+                        elevator.toggleDoors();
+                        vrInput.hapticLeft(); // Haptic feedback
+                    } else {
+                        System.out.println("[GameScreen] Too far from elevator to control doors (distance: " + distanceToElevator + ")");
+                    }
                 }
             }
-        }
 
-        // Exit game
-        if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
-            Gdx.input.setCursorCatched(false);
-            Gdx.app.exit();
+            // Exit game - handled by Oculus button (system)
+
+        } else {
+            // Desktop Mode - Keyboard input
+
+            // Toggle flashlight
+            if (Gdx.input.isKeyJustPressed(Input.Keys.F)) {
+                lightingManager.toggleFlashlight();
+            }
+
+            // Toggle elevator doors with E key
+            if (Gdx.input.isKeyJustPressed(Input.Keys.E)) {
+                if (elevator != null) {
+                    // Check if player is close enough to the elevator
+                    final float distanceToElevator = elevator.getDistanceToPlayer(player.getPosition());
+                    if (distanceToElevator <= 8.0f) { // Within 8 units
+                        elevator.toggleDoors();
+                    } else {
+                        System.out.println("[GameScreen] Too far from elevator to control doors (distance: " + distanceToElevator + ")");
+                    }
+                }
+            }
+
+            // Exit game
+            if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+                Gdx.input.setCursorCatched(false);
+                Gdx.app.exit();
+            }
         }
     }
 
@@ -556,23 +724,35 @@ public class GameScreen extends ScalableGameScreen {
      * Updates camera position and rotation based on player state.
      */
     private void updateCamera() {
-        camera.position.set(player.getPosition());
+        if (vrMode) {
+            // VR mode - update VR camera controller
+            vrCameraController.setBodyPosition(player.getPosition());
+            vrCameraController.setBodyYaw(bodyYaw);
+            vrCameraController.update();
 
-        // Apply jumpscare screen shake if active
-        if (jumpscareActive) {
-            camera.position.add(jumpscareShakeOffset);
+            // Apply jumpscare shake would be handled differently in VR
+            // TODO: Implement VR jumpscare effect (controller haptics + screen shake)
+
+        } else {
+            // Desktop mode - update standard camera
+            camera.position.set(player.getPosition());
+
+            // Apply jumpscare screen shake if active
+            if (jumpscareActive) {
+                camera.position.add(jumpscareShakeOffset);
+            }
+
+            // Calculate look direction
+            final double yawRad = Math.toRadians(yaw);
+            final double pitchRad = Math.toRadians(pitch);
+
+            final float lookX = (float) (Math.cos(pitchRad) * Math.sin(yawRad));
+            final float lookY = (float) Math.sin(pitchRad);
+            final float lookZ = -(float) (Math.cos(pitchRad) * Math.cos(yawRad));
+
+            camera.direction.set(lookX, lookY, lookZ).nor();
+            camera.update();
         }
-
-        // Calculate look direction
-        final double yawRad = Math.toRadians(yaw);
-        final double pitchRad = Math.toRadians(pitch);
-
-        final float lookX = (float) (Math.cos(pitchRad) * Math.sin(yawRad));
-        final float lookY = (float) Math.sin(pitchRad);
-        final float lookZ = -(float) (Math.cos(pitchRad) * Math.cos(yawRad));
-
-        camera.direction.set(lookX, lookY, lookZ).nor();
-        camera.update();
     }
 
     /**
@@ -687,11 +867,44 @@ public class GameScreen extends ScalableGameScreen {
 
     @Override
     public void hide() {
-        Gdx.input.setCursorCatched(false);
+        if (!vrMode) {
+            Gdx.input.setCursorCatched(false);
+        }
+
+        // Clean up VR resources
+        if (vrMode && vrManager != null) {
+            if (stereoFramebufferManager != null) {
+                stereoFramebufferManager.dispose();
+            }
+            vrManager.shutdown();
+        }
+
         gameUI.dispose();
         mazeRenderer.dispose();
         materialManager.dispose();
         lightingManager.dispose();
+    }
+
+    /**
+     * Helper method for wall sliding collision handling.
+     * Tries to slide along walls when direct movement is blocked.
+     *
+     * @param moveDirection Desired movement direction
+     * @param delta Time delta
+     */
+    private void handleWallSliding(final Vector3 moveDirection, final float delta) {
+        // Try sliding along walls (X direction only)
+        final Vector3 slideX = player.getPosition().cpy().add(moveDirection.x, 0, 0);
+        if (!checkCollision(slideX)) {
+            player.getPosition().set(slideX);
+        } else {
+            // Try sliding along walls (Z direction only)
+            final Vector3 slideZ = player.getPosition().cpy().add(0, 0, moveDirection.z);
+            if (!checkCollision(slideZ)) {
+                player.getPosition().set(slideZ);
+            }
+            // If both fail, player is stuck in corner and doesn't move
+        }
     }
 
     @Override

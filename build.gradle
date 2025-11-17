@@ -20,6 +20,18 @@ dependencies {
 
     // GLTF/GLB model loader for LibGDX
     implementation 'com.github.mgsx-dev.gdx-gltf:core:2.2.1'
+
+    // VR Support - LWJGL OpenVR bindings for desktop VR (SteamVR, Oculus Link)
+    def lwjglVersion = '3.3.3'
+    implementation platform("org.lwjgl:lwjgl-bom:$lwjglVersion")
+    implementation "org.lwjgl:lwjgl"
+    implementation "org.lwjgl:lwjgl-openvr"
+
+    // LWJGL natives for desktop platforms
+    def lwjglNatives = System.getProperty("os.name").toLowerCase().contains("mac") ? "natives-macos" :
+                       System.getProperty("os.name").toLowerCase().contains("linux") ? "natives-linux" : "natives-windows"
+    runtimeOnly "org.lwjgl:lwjgl::$lwjglNatives"
+    runtimeOnly "org.lwjgl:lwjgl-openvr::$lwjglNatives"
 }
 
 application {

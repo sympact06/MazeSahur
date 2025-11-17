@@ -56,5 +56,13 @@ public final class GameConfig {
     public static final float FOG_DENSITY = 0.12f;
     public static final float FOG_START_DISTANCE = 8f;
     public static final float FOG_END_DISTANCE = 35f;
+
+    // VR settings
+    // NOTE: VR requires x64 architecture (Intel) - not supported on ARM64 (Apple Silicon)
+    public static final boolean VR_ENABLED = true; // Toggle VR mode (set to true on x64 systems with VR)
+    public static final boolean VR_SNAP_TURN = false; // true = snap turn, false = smooth rotation
+    public static final float VR_SNAP_TURN_ANGLE = 30.0f; // Degrees per snap
+    public static final float VR_SMOOTH_TURN_SPEED = 90.0f; // Degrees per second at full thumbstick
+    public static final float VR_CONTROLLER_DEADZONE = 0.3f; // Thumbstick deadzone
 }
 
