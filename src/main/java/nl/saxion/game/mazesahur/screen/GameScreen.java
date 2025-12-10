@@ -51,6 +51,8 @@ public class GameScreen extends ScalableGameScreen {
 
     // Audio
     private Sound flashlightToggleSound;
+    private Sound sahurFootstepsSound;
+    private long sahurFootstepsSoundId = -1;
 
     // Camera control
     private float yaw;
@@ -152,6 +154,14 @@ public class GameScreen extends ScalableGameScreen {
         // Load audio
         flashlightToggleSound = Gdx.audio.newSound(Gdx.files.internal("audio/light-switch-81967.mp3"));
 
+        // Load Sahur's heavy footsteps sound
+        try {
+            sahurFootstepsSound = Gdx.audio.newSound(Gdx.files.internal("audio/heavy-walking.mp3"));
+            System.out.println("[GameScreen] Loaded Sahur footsteps sound");
+        } catch (Exception e) {
+            System.err.println("[GameScreen] Failed to load Sahur footsteps sound: " + e.getMessage());
+        }
+
         // Capture cursor for FPS controls
         Gdx.input.setCursorCatched(true);
 
@@ -211,6 +221,9 @@ public class GameScreen extends ScalableGameScreen {
 
             // Update footsteps
             mazeRenderer.updateFootsteps(delta, enemy);
+
+            // Update Sahur footsteps audio based on distance
+            updateSahurFootstepsAudio();
 
             // Handle input
             handleGameInput();
@@ -670,6 +683,12 @@ public class GameScreen extends ScalableGameScreen {
         jumpscareActive = true;
         jumpscareTimer = 0f;
 
+        // Stop Sahur footsteps sound
+        if (sahurFootstepsSound != null && sahurFootstepsSoundId != -1) {
+            sahurFootstepsSound.stop(sahurFootstepsSoundId);
+            sahurFootstepsSoundId = -1;
+        }
+
         System.out.println("[GameScreen] Player caught! Triggering jumpscare...");
 
         // Snap camera to face enemy
@@ -746,6 +765,47 @@ public class GameScreen extends ScalableGameScreen {
         GameApp.switchScreen("DeathScreen");
     }
 
+    /**
+     * Updates Sahur's heavy footsteps audio based on distance from the player.
+     * The sound gets louder as Sahur gets closer and quieter as he moves away.
+     */
+    private void updateSahurFootstepsAudio() {
+        if (sahurFootstepsSound == null) {
+            return; // Sound not loaded
+        }
+
+        // Calculate distance between player and Sahur
+        final float distance = player.getPosition().dst(enemy.getPosition());
+
+        // Define distance thresholds for audio
+        final float maxHearingDistance = 50f; // Can hear from up to 50 units away
+        final float minDistance = 5f; // Minimum distance for volume calculation
+
+        // If Sahur is too far away, stop the sound
+        if (distance > maxHearingDistance) {
+            if (sahurFootstepsSoundId != -1) {
+                sahurFootstepsSound.stop(sahurFootstepsSoundId);
+                sahurFootstepsSoundId = -1;
+            }
+            return;
+        }
+
+        // Calculate volume based on distance (inverse distance falloff)
+        // Closer = louder, farther = quieter
+        final float normalizedDistance = Math.max(0f, Math.min(1f, (distance - minDistance) / (maxHearingDistance - minDistance)));
+        final float volume = (1f - normalizedDistance) * 0.8f; // Max volume 80%
+
+        // Start or update the looping sound
+        if (sahurFootstepsSoundId == -1) {
+            // Start playing the sound in a loop
+            sahurFootstepsSoundId = sahurFootstepsSound.loop(volume);
+            System.out.println("[GameScreen] Started Sahur footsteps audio (distance: " + (int)distance + ", volume: " + String.format("%.2f", volume) + ")");
+        } else {
+            // Update the volume of the existing sound
+            sahurFootstepsSound.setVolume(sahurFootstepsSoundId, volume);
+        }
+    }
+
     @Override
     public void resize(final int width, final int height) {
         camera.viewportWidth = width;
@@ -756,12 +816,23 @@ public class GameScreen extends ScalableGameScreen {
     @Override
     public void hide() {
         Gdx.input.setCursorCatched(false);
+
+        // Stop Sahur footsteps sound
+        if (sahurFootstepsSound != null && sahurFootstepsSoundId != -1) {
+            sahurFootstepsSound.stop(sahurFootstepsSoundId);
+            sahurFootstepsSoundId = -1;
+        }
+
         gameUI.dispose();
         mazeRenderer.dispose();
         materialManager.dispose();
         lightingManager.dispose();
+
         if (flashlightToggleSound != null) {
             flashlightToggleSound.dispose();
+        }
+        if (sahurFootstepsSound != null) {
+            sahurFootstepsSound.dispose();
         }
     }
 
