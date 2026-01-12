@@ -18,6 +18,7 @@ import nl.saxion.game.mazesahur.config.GameConfig;
 import nl.saxion.game.mazesahur.entity.Player;
 import nl.saxion.game.mazesahur.entity.Enemy;
 import nl.saxion.game.mazesahur.entity.PhotoFrame;
+import nl.saxion.game.mazesahur.entity.PolicePinboard;
 import nl.saxion.game.mazesahur.entity.Boost;
 import nl.saxion.game.mazesahur.rendering.LightingManager;
 import nl.saxion.game.mazesahur.rendering.MaterialManager;
@@ -43,6 +44,7 @@ public class GameScreen extends ScalableGameScreen {
     private Enemy enemy;
     private Maze maze;
     private List<PhotoFrame> photoFrames;
+    private List<PolicePinboard> policePinboards;
     private List<Boost> boosts;
 
     // Rendering systems
@@ -158,6 +160,9 @@ public class GameScreen extends ScalableGameScreen {
         // Initialize photo frames on walls
         photoFrames = createPhotoFramesOnWalls();
 
+        // Initialize police pinboards on walls
+        policePinboards = createPolicePinboards();
+
         // Initialize boost pickups
         boosts = createBoostPickups();
 
@@ -242,6 +247,9 @@ public class GameScreen extends ScalableGameScreen {
 
         // Load photo frames after renderer is initialized
         mazeRenderer.loadPhotoFrames(photoFrames);
+
+        // Load police pinboards after renderer is initialized
+        mazeRenderer.loadPolicePinboards(policePinboards);
 
         // Load boost pickups after renderer is initialized
         mazeRenderer.loadBoosts(boosts);
@@ -642,6 +650,64 @@ public class GameScreen extends ScalableGameScreen {
                 final float worldZ = gridZ * Maze.CELL_SIZE + Maze.CELL_SIZE / 2f + (dz * Maze.CELL_SIZE * 0.49f);
 
                 frames.add(new PhotoFrame(maze, worldX, worldZ, wallFace));
+            }
+        }
+    }
+
+    /**
+     * Creates police pinboards on walls at specific locations throughout the maze.
+     * Spawns at a few strategic locations to add atmosphere.
+     */
+    private List<PolicePinboard> createPolicePinboards() {
+        final List<PolicePinboard> pinboards = new ArrayList<>();
+        final Random random = new Random(maze.getWidth() * maze.getHeight()); // Consistent seed
+        final float spawnChance = 0.03f; // 3% chance per suitable wall (less common than photos)
+
+        System.out.println("[GameScreen] ===== POLICE PINBOARD SPAWN DEBUG =====");
+
+        // Iterate through all maze cells
+        for (int gridZ = 1; gridZ < maze.getHeight() - 1; gridZ++) {
+            for (int gridX = 1; gridX < maze.getWidth() - 1; gridX++) {
+                // Only look at corridor cells (not walls)
+                if (!maze.isWall(gridX, gridZ)) {
+                    // Check each wall direction
+                    checkAndSpawnPinboard(pinboards, random, gridX, gridZ, 0, -1, PolicePinboard.WallFace.NORTH, spawnChance);
+                    checkAndSpawnPinboard(pinboards, random, gridX, gridZ, 0, 1, PolicePinboard.WallFace.SOUTH, spawnChance);
+                    checkAndSpawnPinboard(pinboards, random, gridX, gridZ, 1, 0, PolicePinboard.WallFace.EAST, spawnChance);
+                    checkAndSpawnPinboard(pinboards, random, gridX, gridZ, -1, 0, PolicePinboard.WallFace.WEST, spawnChance);
+                }
+            }
+        }
+
+        System.out.println("[GameScreen] Created " + pinboards.size() + " police pinboards throughout maze");
+        System.out.println("[GameScreen] =====================================");
+
+        return pinboards;
+    }
+
+    /**
+     * Helper method to check if a pinboard should spawn on a wall and add it if so.
+     */
+    private void checkAndSpawnPinboard(final List<PolicePinboard> pinboards, final Random random,
+                                        final int gridX, final int gridZ,
+                                        final int dx, final int dz,
+                                        final PolicePinboard.WallFace wallFace,
+                                        final float spawnChance) {
+        final int wallX = gridX + dx;
+        final int wallZ = gridZ + dz;
+
+        // Check if there's a wall in this direction
+        if (wallX >= 0 && wallX < maze.getWidth() &&
+            wallZ >= 0 && wallZ < maze.getHeight() &&
+            maze.isWall(wallX, wallZ)) {
+
+            // Random chance to spawn pinboard
+            if (random.nextFloat() < spawnChance) {
+                // Calculate world position (center of corridor cell, offset very close to wall)
+                final float worldX = gridX * Maze.CELL_SIZE + Maze.CELL_SIZE / 2f + (dx * Maze.CELL_SIZE * 0.49f);
+                final float worldZ = gridZ * Maze.CELL_SIZE + Maze.CELL_SIZE / 2f + (dz * Maze.CELL_SIZE * 0.49f);
+
+                pinboards.add(new PolicePinboard(maze, worldX, worldZ, wallFace));
             }
         }
     }
@@ -1058,6 +1124,9 @@ public class GameScreen extends ScalableGameScreen {
         // Herlaad photo frames en boosts voor nieuwe level
         photoFrames = createPhotoFramesOnWalls();
         mazeRenderer.loadPhotoFrames(photoFrames);
+
+        policePinboards = createPolicePinboards();
+        mazeRenderer.loadPolicePinboards(policePinboards);
 
         boosts = createBoostPickups();
         mazeRenderer.loadBoosts(boosts);

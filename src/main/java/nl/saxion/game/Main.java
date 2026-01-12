@@ -24,7 +24,7 @@ public final class Main {
      * Main method that starts the game.
      *
      * @param args Command line arguments (not used)
-     */
+     */ 
     public static void main(String[] args) {
         // Add splash screen
         GameApp.addScreen("Splash", new SplashScreen());

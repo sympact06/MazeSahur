@@ -34,6 +34,7 @@ import nl.saxion.game.mazesahur.config.GameConfig;
 import nl.saxion.game.mazesahur.entity.Enemy;
 import nl.saxion.game.mazesahur.entity.Elevator;
 import nl.saxion.game.mazesahur.entity.PhotoFrame;
+import nl.saxion.game.mazesahur.entity.PolicePinboard;
 import nl.saxion.game.mazesahur.entity.Boost;
 import nl.saxion.game.mazesahur.world.Maze;
 
@@ -67,6 +68,7 @@ public class MazeRenderer {
     private Model ceilingLampModel;
     private Model elevatorModel;
     private Model photoFrameModel;
+    private Model policePinboardModel;
     private Model boostModel;
     private com.badlogic.gdx.graphics.Texture whiteTexture; // 1x1 white texture for elevator (not used for floor)
     private com.badlogic.gdx.graphics.Texture elevatorFloorTexture; // Floor platform texture (only for Mirror material)
@@ -94,6 +96,7 @@ public class MazeRenderer {
     private List<Boolean> lampIsBroken; // Track which lamps are completely broken
     private ModelInstance elevatorInstance;
     private List<ModelInstance> photoFrameInstances;
+    private List<ModelInstance> policePinboardInstances;
     private List<ModelInstance> boostInstances;
     private AnimationController elevatorAnimationController;
     private AnimationController enemyWalkingAnimationController;
@@ -142,6 +145,7 @@ public class MazeRenderer {
         this.lampLightPositions = new ArrayList<>();
         this.lampIsBroken = new ArrayList<>();
         this.photoFrameInstances = new ArrayList<>();
+        this.policePinboardInstances = new ArrayList<>();
         this.boostInstances = new ArrayList<>();
     }
 
@@ -1230,6 +1234,61 @@ public class MazeRenderer {
     }
 
     /**
+     * Loads police pinboard models for a given list of pinboard entities.
+     * Uses the OBJ model from the Police Pinboard folder.
+     *
+     * @param policePinboards List of police pinboard entities to create models for
+     */
+    public void loadPolicePinboards(final List<PolicePinboard> policePinboards) {
+        System.out.println("[MazeRenderer] Loading " + policePinboards.size() + " police pinboards...");
+
+        // Load police pinboard OBJ model
+        final ObjLoader objLoader = new ObjLoader();
+        policePinboardModel = objLoader.loadModel(Gdx.files.internal("models/Police Pinboard/model_0.obj"));
+
+        // Apply textures to the police pinboard model
+        for (final com.badlogic.gdx.graphics.g3d.model.Node node : policePinboardModel.nodes) {
+            if (node.parts.size > 0) {
+                final Material material = node.parts.get(0).material;
+
+                // Load textures if they exist
+                final FileHandle albedoFile = Gdx.files.internal("models/Police Pinboard/Box001_albedo.tga.png");
+                if (albedoFile.exists()) {
+                    final com.badlogic.gdx.graphics.Texture albedoTexture = new com.badlogic.gdx.graphics.Texture(albedoFile);
+                    material.set(TextureAttribute.createDiffuse(albedoTexture));
+                }
+
+                final FileHandle normalFile = Gdx.files.internal("models/Police Pinboard/Box001_normal.tga.png");
+                if (normalFile.exists()) {
+                    final com.badlogic.gdx.graphics.Texture normalTexture = new com.badlogic.gdx.graphics.Texture(normalFile);
+                    material.set(TextureAttribute.createNormal(normalTexture));
+                }
+
+                // Set material properties for better visibility
+                material.set(ColorAttribute.createDiffuse(1f, 1f, 1f, 1f));
+                material.set(ColorAttribute.createAmbient(0.5f, 0.5f, 0.5f, 1f));
+            }
+        }
+
+        // Create instances for each police pinboard
+        policePinboardInstances.clear();
+        for (final PolicePinboard pinboard : policePinboards) {
+            final ModelInstance pinboardInstance = new ModelInstance(policePinboardModel);
+
+            // Set position and rotation based on wall face
+            pinboardInstance.transform.setToTranslation(pinboard.getPosition());
+            pinboardInstance.transform.rotate(Vector3.Y, pinboard.getWallFace().getRotationDegrees());
+
+            // Scale to appropriate size (adjust based on the model's actual size)
+            pinboardInstance.transform.scale(0.5f, 0.5f, 0.5f);
+
+            policePinboardInstances.add(pinboardInstance);
+        }
+
+        System.out.println("[MazeRenderer] Police pinboards loaded successfully");
+    }
+
+    /**
      * Loads boost pickup models for a given list of boost entities.
      * Creates glowing spheres with emissive material.
      *
@@ -1353,6 +1412,11 @@ public class MazeRenderer {
         // Render photo frames
         for (final ModelInstance frame : photoFrameInstances) {
             modelBatch.render(frame);
+        }
+
+        // Render police pinboards
+        for (final ModelInstance pinboard : policePinboardInstances) {
+            modelBatch.render(pinboard);
         }
 
         // Render elevator in the same batch to prevent material bleeding
