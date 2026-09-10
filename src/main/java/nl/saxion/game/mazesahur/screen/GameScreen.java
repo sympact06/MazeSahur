@@ -99,6 +99,11 @@ public class GameScreen extends ScalableGameScreen {
     private float contextSendTimer = 0f;
     private static final float CONTEXT_INTERVAL = 0.75f;
     private final Vector3 eventCameraOffset = new Vector3();
+    private final Vector3 forwardVector = new Vector3();
+    private final Vector3 rightVector = new Vector3();
+    private final Vector3 movementInput = new Vector3();
+    private final Vector3 collisionTestPosition = new Vector3();
+    private final Vector3 networkSyncTarget = new Vector3();
 
     // Horror audio (optional placeholders)
     private Sound whisperSound;
@@ -578,9 +583,9 @@ public class GameScreen extends ScalableGameScreen {
         player.setSprinting(isSprinting);
 
         // Calculate movement direction
-        final Vector3 forward = getForwardVector();
-        final Vector3 right = getRightVector();
-        final Vector3 moveDirection = new Vector3();
+        final Vector3 forward = getForwardVector(forwardVector);
+        final Vector3 right = getRightVector(rightVector);
+        final Vector3 moveDirection = movementInput.setZero();
 
         if (Gdx.input.isKeyPressed(Input.Keys.W)) {
             moveDirection.add(forward);
@@ -616,38 +621,40 @@ public class GameScreen extends ScalableGameScreen {
             if (hasInput) {
                 final float speedMultiplier = player.getCurrentSpeedMultiplier();
                 final float currentSpeed = GameConfig.PLAYER_MOVE_SPEED * speedMultiplier;
-                final Vector3 predicted = player.getPosition().cpy()
-                    .add(moveDirection.nor().scl(currentSpeed * delta));
-                if (!checkCollision(predicted)) {
-                    player.getPosition().set(predicted);
+                collisionTestPosition.set(moveDirection).nor().scl(currentSpeed * delta)
+                    .add(player.getPosition());
+                if (!checkCollision(collisionTestPosition)) {
+                    player.getPosition().set(collisionTestPosition);
                 }
             }
             return;
         }
 
-        if (moveDirection.len() > 0) {
+        final float moveLen2 = moveDirection.len2();
+        if (moveLen2 > 0f) {
             // Calculate speed based on energy level
             final float speedMultiplier = player.getCurrentSpeedMultiplier();
             final float currentSpeed = GameConfig.PLAYER_MOVE_SPEED * speedMultiplier;
+            final float moveScale = currentSpeed * delta / (float) Math.sqrt(moveLen2);
 
-            moveDirection.nor().scl(currentSpeed * delta);
+            moveDirection.scl(moveScale);
 
             // Try full movement first
-            final Vector3 newPosition = player.getPosition().cpy().add(moveDirection);
+            collisionTestPosition.set(player.getPosition()).add(moveDirection);
 
-            if (!checkCollision(newPosition)) {
+            if (!checkCollision(collisionTestPosition)) {
                 // No collision, move freely
-                player.getPosition().set(newPosition);
+                player.getPosition().set(collisionTestPosition);
             } else {
                 // Try sliding along walls (X direction only)
-                final Vector3 slideX = player.getPosition().cpy().add(moveDirection.x, 0, 0);
-                if (!checkCollision(slideX)) {
-                    player.getPosition().set(slideX);
+                collisionTestPosition.set(player.getPosition()).add(moveDirection.x, 0, 0);
+                if (!checkCollision(collisionTestPosition)) {
+                    player.getPosition().set(collisionTestPosition);
                 } else {
                     // Try sliding along walls (Z direction only)
-                    final Vector3 slideZ = player.getPosition().cpy().add(0, 0, moveDirection.z);
-                    if (!checkCollision(slideZ)) {
-                        player.getPosition().set(slideZ);
+                    collisionTestPosition.set(player.getPosition()).add(0, 0, moveDirection.z);
+                    if (!checkCollision(collisionTestPosition)) {
+                        player.getPosition().set(collisionTestPosition);
                     }
                     // If both fail, player is stuck in corner and doesn't move
                 }
@@ -950,14 +957,14 @@ public class GameScreen extends ScalableGameScreen {
 
         final RemotePlayerState self = multiplayerSession.getSelfState();
         if (self != null) {
-            final Vector3 target = new Vector3(self.x, self.y, self.z);
-            final float dist = player.getPosition().dst(target);
+            networkSyncTarget.set(self.x, self.y, self.z);
+            final float dist = player.getPosition().dst(networkSyncTarget);
             if (dist > 1.0f) {
                 // Large correction, snap
-                player.getPosition().set(target);
+                player.getPosition().set(networkSyncTarget);
             } else {
                 // Smooth blend
-                player.getPosition().lerp(target, 0.1f);
+                player.getPosition().lerp(networkSyncTarget, 0.1f);
             }
             // Keep local yaw from mouse; server yaw can lag and cause camera snaps
         }
@@ -976,9 +983,9 @@ public class GameScreen extends ScalableGameScreen {
     /**
      * Gets the forward direction vector based on yaw.
      */
-    private Vector3 getForwardVector() {
+    private Vector3 getForwardVector(final Vector3 out) {
         final double radians = Math.toRadians(yaw);
-        return new Vector3(
+        return out.set(
             (float) Math.sin(radians),
             0,
             -(float) Math.cos(radians)
@@ -988,9 +995,9 @@ public class GameScreen extends ScalableGameScreen {
     /**
      * Gets the right direction vector based on yaw.
      */
-    private Vector3 getRightVector() {
+    private Vector3 getRightVector(final Vector3 out) {
         final double radians = Math.toRadians(yaw + 90);
-        return new Vector3(
+        return out.set(
             (float) Math.sin(radians),
             0,
             -(float) Math.cos(radians)

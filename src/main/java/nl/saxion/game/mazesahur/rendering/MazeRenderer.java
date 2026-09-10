@@ -38,8 +38,10 @@ import nl.saxion.game.mazesahur.entity.Boost;
 import nl.saxion.game.mazesahur.world.Maze;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import nl.saxion.game.mazesahur.net.RemotePlayerState;
 
@@ -131,8 +133,13 @@ public class MazeRenderer {
     private Map<String, Float> remotePlayerAnimChangeTime = new ConcurrentHashMap<>();
 
     // Lamp flickering
+    private static final int MAX_SHADER_POINT_LIGHTS = 20;
+    private static final Vector3 DEFAULT_LAMP_COLOR = new Vector3(1.0f, 0.85f, 0.5f);
     private float[] lampFlickerTimers;
     private float[] lampFlickerIntensities;
+    private final Vector3[] reusableLightPositions = new Vector3[MAX_SHADER_POINT_LIGHTS];
+    private final Vector3[] reusableLightColors = new Vector3[MAX_SHADER_POINT_LIGHTS];
+    private final float[] reusableLightIntensities = new float[MAX_SHADER_POINT_LIGHTS];
     private int flickerUpdateCounter = 0; // Update every N frames for performance
 
     // Debug visualization
@@ -156,6 +163,10 @@ public class MazeRenderer {
         this.lampIsBroken = new ArrayList<>();
         this.photoFrameInstances = new ArrayList<>();
         this.boostInstances = new ArrayList<>();
+        for (int i = 0; i < MAX_SHADER_POINT_LIGHTS; i++) {
+            reusableLightPositions[i] = new Vector3();
+            reusableLightColors[i] = new Vector3(DEFAULT_LAMP_COLOR);
+        }
     }
 
     /**
@@ -920,25 +931,23 @@ public class MazeRenderer {
         }
         flickerUpdateCounter = 0;
 
-        final int numLampLights = lampFlickerTimers.length;
+        final int maxLampLights = portalPlacementValid ? MAX_SHADER_POINT_LIGHTS - 1 : MAX_SHADER_POINT_LIGHTS;
+        final int numLampLights = Math.min(lampFlickerTimers.length, Math.min(lampLightPositions.size(), maxLampLights));
         final boolean includePortalLight = portalPlacementValid;
-        final int totalLights = Math.min(numLampLights + (includePortalLight ? 1 : 0), 20);
-        final Vector3[] positions = new Vector3[totalLights];
-        final Vector3[] colors = new Vector3[totalLights];
-        final float[] intensities = new float[totalLights];
+        final int totalLights = numLampLights + (includePortalLight ? 1 : 0);
 
         for (int i = 0; i < numLampLights; i++) {
-            positions[i] = lampLightPositions.get(i);
+            reusableLightPositions[i].set(lampLightPositions.get(i));
             if (lampColorOverride != null) {
-                colors[i] = new Vector3(lampColorOverride);
+                reusableLightColors[i].set(lampColorOverride);
             } else {
-                colors[i] = new Vector3(1.0f, 0.85f, 0.5f); // Warm yellow
+                reusableLightColors[i].set(DEFAULT_LAMP_COLOR);
             }
 
             // Check if this lamp is completely broken
             if (lampIsBroken.get(i)) {
                 // Broken lamps stay off (no light)
-                intensities[i] = 0.0f;
+                reusableLightIntensities[i] = 0.0f;
                 lampFlickerIntensities[i] = 0.0f;
             } else {
                 // Working lamps flicker dramatically
@@ -986,18 +995,20 @@ public class MazeRenderer {
                 intensity = Math.max(0.0f, Math.min(2.5f, intensity));
 
                 lampFlickerIntensities[i] = intensity;
-                intensities[i] = intensity;
+                reusableLightIntensities[i] = intensity;
             }
         }
 
         if (includePortalLight && totalLights > numLampLights) {
             final int index = numLampLights;
-            positions[index] = new Vector3(portalLightPosition);
-            colors[index] = new Vector3(portalLightColor);
-            intensities[index] = portalLightIntensity;
+            reusableLightPositions[index].set(portalLightPosition);
+            reusableLightColors[index].set(portalLightColor);
+            reusableLightIntensities[index] = portalLightIntensity;
         }
 
-        lightingManager.getShader().setPointLights(positions, colors, intensities, totalLights);
+        lightingManager.getShader().setPointLights(
+            reusableLightPositions, reusableLightColors, reusableLightIntensities, totalLights
+        );
     }
 
     public void setLampColorOverride(final Vector3 color) {
@@ -1607,17 +1618,6 @@ public class MazeRenderer {
             final float animDelta = delta * speedMultiplier;
             currentAnimController.update(animDelta);
 
-            // Debug: Log animation state occasionally (every 60 frames)
-            if (Gdx.graphics.getFrameId() % 60 == 0) {
-                System.out.println("[MazeRenderer] Animation update: model=" + (isRunning ? "Running" : "Walking")
-                    + ", delta=" + animDelta + ", speed=" + speedMultiplier + ", state=" + enemy.getCurrentState());
-            }
-        } else {
-            // Debug: Log if animation controller is missing
-            if (Gdx.graphics.getFrameId() % 60 == 0) {
-                System.out.println("[MazeRenderer] WARNING: No animation controller for "
-                    + (isRunning ? "Running" : "Walking") + " model!");
-            }
         }
 
         // Update enemy transform - IMPORTANT: order is translate -> rotate -> scale
@@ -1667,20 +1667,17 @@ public class MazeRenderer {
         }
 
         // Remove instances and controllers that are no longer present
-        remotePlayerInstances.keySet().removeIf(id ->
-            players.stream().noneMatch(p -> p.id.equals(id)));
-        remotePlayerAnimControllers.keySet().removeIf(id ->
-            players.stream().noneMatch(p -> p.id.equals(id)));
-        remotePlayerCurrentAnim.keySet().removeIf(id ->
-            players.stream().noneMatch(p -> p.id.equals(id)));
-        remotePlayerPrevPositions.keySet().removeIf(id ->
-            players.stream().noneMatch(p -> p.id.equals(id)));
-        remotePlayerSpeedAvg.keySet().removeIf(id ->
-            players.stream().noneMatch(p -> p.id.equals(id)));
-        remotePlayerAnimChangeTime.keySet().removeIf(id ->
-            players.stream().noneMatch(p -> p.id.equals(id)));
-        remotePlayerCharacterTypes.keySet().removeIf(id ->
-            players.stream().noneMatch(p -> p.id.equals(id)));
+        final Set<String> activePlayerIds = new HashSet<>(players.size());
+        for (RemotePlayerState state : players) {
+            activePlayerIds.add(state.id);
+        }
+        remotePlayerInstances.keySet().removeIf(id -> !activePlayerIds.contains(id));
+        remotePlayerAnimControllers.keySet().removeIf(id -> !activePlayerIds.contains(id));
+        remotePlayerCurrentAnim.keySet().removeIf(id -> !activePlayerIds.contains(id));
+        remotePlayerPrevPositions.keySet().removeIf(id -> !activePlayerIds.contains(id));
+        remotePlayerSpeedAvg.keySet().removeIf(id -> !activePlayerIds.contains(id));
+        remotePlayerAnimChangeTime.keySet().removeIf(id -> !activePlayerIds.contains(id));
+        remotePlayerCharacterTypes.keySet().removeIf(id -> !activePlayerIds.contains(id));
 
         final float delta = Gdx.graphics.getDeltaTime();
         remotePlayerAnimClock += delta;
@@ -1786,7 +1783,6 @@ public class MazeRenderer {
                             animController.setAnimation(characterModel.animations.get(i).id, -1);
                             remotePlayerCurrentAnim.put(state.id, targetAnim);
                             remotePlayerAnimChangeTime.put(state.id, remotePlayerAnimClock);
-                            System.out.println("[MazeRenderer] Player " + state.id + " animation: " + targetAnim);
                             break;
                         }
                     }

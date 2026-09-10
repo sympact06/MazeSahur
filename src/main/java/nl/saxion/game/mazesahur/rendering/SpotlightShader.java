@@ -7,6 +7,7 @@ import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.Shader;
 import com.badlogic.gdx.graphics.g3d.utils.RenderContext;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.math.Matrix3;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
@@ -26,6 +27,8 @@ public class SpotlightShader implements Shader {
     private ShaderProgram program;
     private Camera camera;
     private RenderContext context;
+    private final Matrix3 reusableNormalMatrix = new Matrix3();
+    private final float[] reusableNormalValues = new float[9];
 
     // Spotlight parameters
     private final Vector3 spotPosition = new Vector3();
@@ -177,17 +180,21 @@ public class SpotlightShader implements Shader {
         // Extract 3x3 normal matrix from 4x4 world transform
         // Normal matrix is the transpose of the inverse of the upper-left 3x3 of world matrix
         final com.badlogic.gdx.math.Matrix4 worldMat = renderable.worldTransform;
-        final com.badlogic.gdx.math.Matrix3 normalMatrix = new com.badlogic.gdx.math.Matrix3();
 
         // Extract 3x3 rotation/scale part from 4x4 matrix
         final float[] vals = worldMat.val;
-        normalMatrix.set(new float[] {
-            vals[com.badlogic.gdx.math.Matrix4.M00], vals[com.badlogic.gdx.math.Matrix4.M01], vals[com.badlogic.gdx.math.Matrix4.M02],
-            vals[com.badlogic.gdx.math.Matrix4.M10], vals[com.badlogic.gdx.math.Matrix4.M11], vals[com.badlogic.gdx.math.Matrix4.M12],
-            vals[com.badlogic.gdx.math.Matrix4.M20], vals[com.badlogic.gdx.math.Matrix4.M21], vals[com.badlogic.gdx.math.Matrix4.M22]
-        });
+        reusableNormalValues[0] = vals[com.badlogic.gdx.math.Matrix4.M00];
+        reusableNormalValues[1] = vals[com.badlogic.gdx.math.Matrix4.M01];
+        reusableNormalValues[2] = vals[com.badlogic.gdx.math.Matrix4.M02];
+        reusableNormalValues[3] = vals[com.badlogic.gdx.math.Matrix4.M10];
+        reusableNormalValues[4] = vals[com.badlogic.gdx.math.Matrix4.M11];
+        reusableNormalValues[5] = vals[com.badlogic.gdx.math.Matrix4.M12];
+        reusableNormalValues[6] = vals[com.badlogic.gdx.math.Matrix4.M20];
+        reusableNormalValues[7] = vals[com.badlogic.gdx.math.Matrix4.M21];
+        reusableNormalValues[8] = vals[com.badlogic.gdx.math.Matrix4.M22];
+        reusableNormalMatrix.set(reusableNormalValues);
 
-        program.setUniformMatrix("u_normalMatrix", normalMatrix);
+        program.setUniformMatrix("u_normalMatrix", reusableNormalMatrix);
 
         // Bind textures with proper fallbacks
         final com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute diffuseAttr =

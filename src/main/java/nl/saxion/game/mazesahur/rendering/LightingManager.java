@@ -22,6 +22,10 @@ public class LightingManager {
     private float intensityMultiplier = 1f;
     private final Vector3 defaultFlashlightColor = new Vector3(1.4f, 1.4f, 1.35f);
     private final Vector3 flashlightColor = new Vector3(1.4f, 1.4f, 1.35f);
+    private final Vector3 tmpForward = new Vector3();
+    private final Vector3 tmpRight = new Vector3();
+    private final Vector3 tmpUp = new Vector3();
+    private final Vector3 tmpBobDirection = new Vector3();
 
     // Bobbing effect
     private float bobbingTime = 0f;
@@ -67,17 +71,16 @@ public class LightingManager {
         final float horizontalBob = (float) Math.cos(bobbingTime * 1.3f) * SIDE_BOBBING_AMOUNT;
 
         // Calculate direction with bobbing
-        final Vector3 forward = cameraDirection.cpy().nor();
-        final Vector3 right = new Vector3(forward).crs(Vector3.Y).nor();
-        final Vector3 up = new Vector3(right).crs(forward).nor();
-
-        final Vector3 bobDirection = forward.cpy()
-            .add(right.cpy().scl(horizontalBob))
-            .add(up.cpy().scl(verticalBob))
+        final Vector3 forward = tmpForward.set(cameraDirection).nor();
+        final Vector3 right = tmpRight.set(forward).crs(Vector3.Y).nor();
+        final Vector3 up = tmpUp.set(right).crs(forward).nor();
+        final Vector3 bobDirection = tmpBobDirection.set(forward)
+            .mulAdd(right, horizontalBob)
+            .mulAdd(up, verticalBob)
             .nor();
 
         // Position flashlight at player with slight offset
-        spotPosition.set(playerPosition).add(bobDirection.cpy().scl(0.3f)).add(0, -0.15f, 0);
+        spotPosition.set(playerPosition).mulAdd(bobDirection, 0.3f).add(0, -0.15f, 0);
         spotDirection.set(bobDirection);
 
         // Calculate intensity with flickering
