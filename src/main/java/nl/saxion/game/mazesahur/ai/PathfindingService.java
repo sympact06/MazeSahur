@@ -44,6 +44,7 @@ public final class PathfindingService {
 
         final PriorityQueue<RailSearchNode> openSet = new PriorityQueue<>(
             Comparator.comparingDouble(n -> n.fScore));
+        final Set<String> openSetKeys = new HashSet<>();
         final Set<String> closedSet = new HashSet<>();
         final Map<String, RailSearchNode> allNodes = new HashMap<>();
 
@@ -54,6 +55,7 @@ public final class PathfindingService {
             initial.fScore = heuristic(startX, startZ, endX, endZ);
             openSet.add(initial);
             allNodes.put(initial.key(), initial);
+            openSetKeys.add(initial.key());
         } else {
             // If no current direction, try all possible directions
             for (final RailDirection dir : RailDirection.values()) {
@@ -63,12 +65,14 @@ public final class PathfindingService {
                     initial.fScore = heuristic(startX, startZ, endX, endZ);
                     openSet.add(initial);
                     allNodes.put(initial.key(), initial);
+                    openSetKeys.add(initial.key());
                 }
             }
         }
 
         while (!openSet.isEmpty()) {
             final RailSearchNode current = openSet.poll();
+            openSetKeys.remove(current.key());
 
             // Check if we reached the end
             if (current.node.getX() == endX && current.node.getZ() == endZ) {
@@ -103,9 +107,11 @@ public final class PathfindingService {
                     neighborNode.fScore = tentativeGScore + heuristic(
                         neighbor.getX(), neighbor.getZ(), endX, endZ);
 
-                    if (!openSet.contains(neighborNode)) {
-                        openSet.add(neighborNode);
+                    if (openSetKeys.contains(neighborKey)) {
+                        openSet.remove(neighborNode);
                     }
+                    openSet.add(neighborNode);
+                    openSetKeys.add(neighborKey);
                 }
             }
         }
@@ -126,6 +132,7 @@ public final class PathfindingService {
     public static List<int[]> findPath(final Maze maze, final int startX, final int startZ,
                                         final int endX, final int endZ) {
         final PriorityQueue<Node> openSet = new PriorityQueue<>(Comparator.comparingDouble(n -> n.fScore));
+        final Set<String> openSetKeys = new HashSet<>();
         final Set<String> closedSet = new HashSet<>();
         final Map<String, Node> allNodes = new HashMap<>();
 
@@ -135,9 +142,11 @@ public final class PathfindingService {
 
         openSet.add(startNode);
         allNodes.put(startNode.key(), startNode);
+        openSetKeys.add(startNode.key());
 
         while (!openSet.isEmpty()) {
             final Node current = openSet.poll();
+            openSetKeys.remove(current.key());
 
             if (current.x == endX && current.z == endZ) {
                 return reconstructPath(current);
@@ -170,9 +179,11 @@ public final class PathfindingService {
                     neighbor.gScore = tentativeGScore;
                     neighbor.fScore = tentativeGScore + heuristic(nx, nz, endX, endZ);
 
-                    if (!openSet.contains(neighbor)) {
-                        openSet.add(neighbor);
+                    if (openSetKeys.contains(neighborKey)) {
+                        openSet.remove(neighbor);
                     }
+                    openSet.add(neighbor);
+                    openSetKeys.add(neighborKey);
                 }
             }
         }
@@ -329,4 +340,3 @@ public final class PathfindingService {
         }
     }
 }
-

@@ -60,6 +60,8 @@ public class Enemy {
 
     // Stuck detection
     private final Vector3 lastPosition;
+    private final Vector3 moveDirection = new Vector3();
+    private final Vector3 nextPosition = new Vector3();
     private float stuckTimer;
     private static final float STUCK_THRESHOLD = 0.5f;
 
@@ -298,11 +300,9 @@ public class Enemy {
 
             if (isNewTarget) {
                 pathIndex = 0;
-                System.out.println("New path calculated: " + newPath.size() + " waypoints to new target");
             } else {
                 // Keep current progress on the path if we're just updating to track target
                 pathIndex = Math.min(pathIndex, newPath.size() - 1);
-                System.out.println("Path updated: " + newPath.size() + " waypoints (continuing from index " + pathIndex + ")");
             }
         }
     }
@@ -331,9 +331,6 @@ public class Enemy {
         if (distance < 0.8f) {
             // Move to next waypoint
             pathIndex++;
-            if (pathIndex < currentPath.size()) {
-                System.out.println("Advancing to waypoint " + (pathIndex + 1) + "/" + currentPath.size());
-            }
             return;
         }
 
@@ -354,7 +351,6 @@ public class Enemy {
                     previousDirection = currentDirection;
                     currentDirection = targetDirection;
                     rotationProgress = 0f;
-                    System.out.println("Rotating to face waypoint: " + currentDirection);
                 }
             }
         }
@@ -367,23 +363,21 @@ public class Enemy {
 
         // Move TOWARD the waypoint position (not in rail direction!)
         // The rail direction is only used for visual rotation
-        final Vector3 moveDirection = new Vector3(dx / distance, 0, dz / distance);
+        moveDirection.set(dx / distance, 0, dz / distance);
         // Use faster speed when running (chasing)
         final float baseSpeed = isRunning() ? GameConfig.ENEMY_SPEED_RUNNING : GameConfig.ENEMY_SPEED;
         final float speed = baseSpeed * speedMultiplier;
-        final Vector3 movement = moveDirection.scl(speed * delta);
-        final Vector3 newPosition = position.cpy().add(movement);
+        nextPosition.set(position).mulAdd(moveDirection, speed * delta);
 
         // Check collision and apply movement
-        if (!checkCollision(newPosition)) {
+        if (!checkCollision(nextPosition)) {
             // Save last position for stuck detection
             if (stuckTimer == 0) {
                 lastPosition.set(position);
             }
-            position.set(newPosition);
+            position.set(nextPosition);
         } else {
             // If we hit a wall, we're probably stuck
-            System.out.println("Hit wall at waypoint " + (pathIndex + 1) + ", stuck!");
             handleStuck();
         }
 
@@ -392,7 +386,6 @@ public class Enemy {
         if (stuckTimer > STUCK_THRESHOLD) {
             final float distanceMoved = position.dst(lastPosition);
             if (distanceMoved < 0.3f) {
-                System.out.println("Enemy hasn't moved much: " + distanceMoved);
                 handleStuck();
             }
             stuckTimer = 0;

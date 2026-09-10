@@ -197,8 +197,6 @@ public class FootstepManager {
         // Add to list
         footsteps.add(new Footstep(decal, FOOTSTEP_LIFETIME));
 
-        System.out.println("[FootstepManager] Placed " + (isLeftFoot ? "LEFT" : "RIGHT")
-            + " footstep at (" + footX + ", " + footZ + ") yaw=" + yaw + " (total: " + footsteps.size() + ")");
     }
 
     /**
